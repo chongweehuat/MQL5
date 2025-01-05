@@ -70,6 +70,9 @@ void SendTradeInfo()
             if (responseCode == -1)
             {
                 errorCount++;
+                string responseBody = CharArrayToString(response);
+                Print("Response Code: ", responseCode, ", Response Body: ", responseBody);
+                return;
             }
             else
             {
@@ -99,8 +102,8 @@ string BuildTradeInfo(int index)
     long magicNumber = m_position.Magic();
 
     string postData = "ea_version=" + EA_Version + "&";
-    postData += "account_id=" + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)) + "&";
-    postData += "ticket=" + IntegerToString((int)m_position.Ticket()) + "&";
+    postData += "account_id=" + (string)AccountInfoInteger(ACCOUNT_LOGIN) + "&";
+    postData += "ticket=" + (string)m_position.Ticket() + "&";
     postData += "pair=" + symbol + "&";
     postData += "order_type=" + orderType + "&";
     postData += "volume=" + DoubleToString(volume, 2) + "&";
