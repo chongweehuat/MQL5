@@ -1,16 +1,16 @@
-//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+ 
 //|                                             TradeInfoCollector   |
 //|                                  Copyright 2025, Your Company    |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025, Your Company"
 #property link      "https://sapi.my369.click"
-#property version   "1.2"
+#property version   "1.3"
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
 
 // Input Parameters
-input string EA_Version = "1.2";                 // EA Version
+input string EA_Version = "1.3";                 // EA Version
 input string EndpointURL = "https://sapi.my369.click/TradeInfoCollector.php"; // Endpoint URL
 input int Timeout = 500;                         // Timeout for WebRequest
 
@@ -93,22 +93,23 @@ string BuildTradeInfo(int index)
     double volume = m_position.Volume();
     double profit = m_position.Profit();
     double openPrice = m_position.PriceOpen();
-    double stopLoss = m_position.StopLoss();
-    double takeProfit = m_position.TakeProfit();
+    double bidPrice = SymbolInfoDouble(symbol, SYMBOL_BID); // Current bid price
+    double askPrice = SymbolInfoDouble(symbol, SYMBOL_ASK); // Current ask price
     datetime openTime = m_position.Time();
     long magicNumber = m_position.Magic();
 
     string postData = "ea_version=" + EA_Version + "&";
-    postData += "account_number=" + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)) + "&";
-    postData += "symbol=" + symbol + "&";
-    postData += "type=" + orderType + "&";
+    postData += "account_id=" + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)) + "&";
+    postData += "ticket=" + IntegerToString((int)m_position.Ticket()) + "&";
+    postData += "pair=" + symbol + "&";
+    postData += "order_type=" + orderType + "&";
     postData += "volume=" + DoubleToString(volume, 2) + "&";
-    postData += "profit=" + DoubleToString(profit, 2) + "&";
     postData += "open_price=" + DoubleToString(openPrice, 5) + "&";
-    postData += "stop_loss=" + DoubleToString(stopLoss, 5) + "&";
-    postData += "take_profit=" + DoubleToString(takeProfit, 5) + "&";
+    postData += "profit=" + DoubleToString(profit, 2) + "&";
     postData += "open_time=" + TimeToString(openTime, TIME_DATE | TIME_MINUTES) + "&";
-    postData += "magic_number=" + IntegerToString(magicNumber);
+    postData += "bid_price=" + DoubleToString(bidPrice, 5) + "&";
+    postData += "ask_price=" + DoubleToString(askPrice, 5) + "&";
+    postData += "magic_number=" + IntegerToString((int)magicNumber);
 
     return postData;
 }
