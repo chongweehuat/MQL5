@@ -5,14 +5,15 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2025, Your Company"
 #property link      "https://sapi.my369.click"
-#property version   "1.3"
+#property version   "1.4"
 
 #include <Trade\Trade.mqh>
 
 // Input Parameters
-input string EA_Version   = "1.3"; // EA Version
+input string EA_Version   = "1.4"; // EA Version
 input string EndpointURL  = "https://sapi.my369.click/TradeInfoCollector.php"; // Endpoint URL
 input int    Timeout      = 5000;  // Timeout for WebRequest in milliseconds
+input int    TimeGapSec   = 3;    // Minimum time gap between requests in seconds
 input bool   debug        = false; // Debug mode
 
 CPositionInfo m_position; // Position object
@@ -22,126 +23,149 @@ int totalSent    = 0;
 int successCount = 0;
 int errorCount   = 0;
 
+// Timestamp for the last WebRequest
+datetime lastRequestTime = 0;
+
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
 int OnInit()
-  {
-   UpdateChartStatus();
-   return(INIT_SUCCEEDED);
-  }
+{
+    UpdateChartStatus();
+    return(INIT_SUCCEEDED);
+}
+
 //+------------------------------------------------------------------+
 //| Expert deinitialization function                                 |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
-  {
-   ClearChartStatus();
-  }
+{
+    ClearChartStatus();
+}
+
 //+------------------------------------------------------------------+
 //| Expert tick function                                             |
 //+------------------------------------------------------------------+
 void OnTick()
-  {
-   SendTradeInfo();
-   UpdateChartStatus();
-  }
+{
+    // Check if sufficient time has passed since the last request
+    if (TimeCurrent() - lastRequestTime >= TimeGapSec) {
+        SendAllTrades();
+        lastRequestTime = TimeCurrent(); // Update the last request timestamp
+    }
+    UpdateChartStatus();
+}
+
 //+------------------------------------------------------------------+
-//| Sends trade information one by one                               |
+//| Sends all open trades in a single WebRequest                     |
 //+------------------------------------------------------------------+
-void SendTradeInfo()
-  {
-   int totalTrades = PositionsTotal();
-   for(int i = 0; i < totalTrades; i++)
-     {
-      if(m_position.SelectByIndex(i))
-        {
-         string postData = BuildTradeInfo();
-         string headers  = "Content-Type: application/x-www-form-urlencoded\r\n";
-         char   data[], response[];
-         string resultHeaders;
+void SendAllTrades()
+{
+    int totalTrades = PositionsTotal();
+    if (totalTrades == 0)
+    {
+        if (debug)
+            Print("No open trades to send.");
+        return;
+    }
 
-         StringToCharArray(postData, data);
-         ResetLastError();
-         int responseCode = WebRequest("POST", EndpointURL, headers, Timeout, data, response, resultHeaders);
-         totalSent++;
+    string payload = BuildAllTradesPayload();
+    if (StringLen(payload) == 0)
+    {
+        Print("Failed to build payload.");
+        return;
+    }
 
-         if(responseCode == -1)
-           {
-            // Handle WebRequest error
-            int errorCode = GetLastError();
-            string errorMsg = "WebRequest failed. Error code: " + IntegerToString(errorCode);
-            Alert(errorMsg);
-            Print(errorMsg);
-            errorCount++;
-            ExpertRemove(); // Stop EA execution
-            return;
-           }
+    string headers = "";
+    char   data[], response[];
+    string resultHeaders;
 
-         string responseText = CharArrayToString(response);
-         if(responseCode == 200 && StringFind(responseText, "\"status\":\"success\"") >= 0)
-           {
-            successCount++;
-            if(debug)
-               Print("Trade data sent successfully for trade index: ", i);
-           }
-         else
-           {
-            errorCount++;
-            Print("Failed to send trade data for trade index: ", i, ". Response code: ", responseCode, ", Response: ", responseText);
-           }
+    StringToCharArray(payload, data);
+    ResetLastError();
+    int responseCode = WebRequest("POST", EndpointURL, headers, Timeout, data, response, resultHeaders);
+    totalSent++;
+
+    if (responseCode == -1)
+    {
+        // Handle WebRequest error
+        int errorCode = GetLastError();
+        string errorMsg = "WebRequest failed. Error code: " + IntegerToString(errorCode);
+        Print(errorMsg);
+        errorCount++;
+        return;
+    }
+
+    string responseText = CharArrayToString(response);
+    if (responseCode == 200)
+    {
+        successCount++;
+        if (debug){
+            Print("All trades sent successfully.");
         }
-     }
-  }
-//+------------------------------------------------------------------+
-//| Builds the query string for trade information                    |
-//+------------------------------------------------------------------+
-string BuildTradeInfo()
-  {
-   string symbol      = m_position.Symbol();
-   string orderType   = m_position.TypeDescription();
-   double volume      = m_position.Volume();
-   double profit      = m_position.Profit();
-   double openPrice   = m_position.PriceOpen();
-   double bidPrice    = SymbolInfoDouble(symbol, SYMBOL_BID); // Current bid price
-   double askPrice    = SymbolInfoDouble(symbol, SYMBOL_ASK); // Current ask price
-   datetime openTime  = m_position.Time();
-   long magicNumber   = m_position.Magic();
-   ulong ticket       = m_position.Ticket();
+    }
+    else
+    {
+        errorCount++;
+        Print("Failed to send trades. Response code: ", responseCode, ", Response: ", responseText);
+    }
+}
 
-   string postData;
-   postData += "ea_version="   + EA_Version + "&";
-   postData += "account_id="   + (string)AccountInfoInteger(ACCOUNT_LOGIN) + "&";
-   postData += "ticket="       + (string)ticket + "&";
-   postData += "pair="         + symbol + "&";
-   postData += "order_type="   + orderType + "&";
-   postData += "volume="       + DoubleToString(volume, 2) + "&";
-   postData += "open_price="   + DoubleToString(openPrice, 5) + "&";
-   postData += "profit="       + DoubleToString(profit, 2) + "&";
-   postData += "open_time="    + TimeToString(openTime, TIME_DATE | TIME_MINUTES) + "&";
-   postData += "bid_price="    + DoubleToString(bidPrice, 5) + "&";
-   postData += "ask_price="    + DoubleToString(askPrice, 5) + "&";
-   postData += "magic_number=" + IntegerToString((int)magicNumber);
+//+------------------------------------------------------------------+
+//| Builds the POST payload for all open trades                      |
+//+------------------------------------------------------------------+
+string BuildAllTradesPayload()
+{
+    int totalTrades = PositionsTotal();
+    if (totalTrades == 0)
+        return "";
 
-   return postData;
-  }
+    // Start payload with consistent key-value pairs for metadata
+    string payload = "ea_version=" + EA_Version + "&";
+    payload += "account_id=" + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)) + "&";
+
+    // Add each trade
+    for (int i = 0; i < totalTrades; i++)
+    {
+        if (m_position.SelectByIndex(i))
+        {
+            string tradeData = "trades[]=";
+            tradeData += "ticket=" + (string)m_position.Ticket() + "|";
+            tradeData += "pair=" + m_position.Symbol() + "|";
+            tradeData += "order_type=" + m_position.TypeDescription() + "|";
+            tradeData += "volume=" + DoubleToString(m_position.Volume(), 2) + "|";
+            tradeData += "profit=" + DoubleToString(m_position.Profit(), 2) + "|";
+            tradeData += "open_price=" + DoubleToString(m_position.PriceOpen(), 5) + "|";
+            tradeData += "bid_price=" + DoubleToString(SymbolInfoDouble(m_position.Symbol(), SYMBOL_BID), 5) + "|";
+            tradeData += "ask_price=" + DoubleToString(SymbolInfoDouble(m_position.Symbol(), SYMBOL_ASK), 5) + "|";
+            tradeData += "open_time=" + TimeToString(m_position.Time(), TIME_DATE | TIME_MINUTES) + "|";
+            tradeData += "magic_number=" + IntegerToString((int)m_position.Magic());
+            payload += tradeData + "&";
+        }
+    }
+
+    return payload;
+}
+
 //+------------------------------------------------------------------+
 //| Update chart with monitoring statistics                          |
 //+------------------------------------------------------------------+
 void UpdateChartStatus()
-  {
-   string status = "Trade Info Collector - Monitoring\n";
-   status += "EA Version: " + EA_Version + "\n";
-   status += "Endpoint: " + EndpointURL + "\n";
-   status += "Total Trades Sent: " + IntegerToString(totalSent) + "\n";
-   status += "Successful: " + IntegerToString(successCount) + "\n";
-   status += "Errors: " + IntegerToString(errorCount);
-   Comment(status);
-  }
+{
+    string status = "Trade Info Collector - Monitoring\n";
+    status += "EA Version: " + EA_Version + "\n";
+    status += "Endpoint: " + EndpointURL + "\n";
+    status += "Total Trades Sent: " + IntegerToString(totalSent) + "\n";
+    status += "Successful: " + IntegerToString(successCount) + "\n";
+    status += "Errors: " + IntegerToString(errorCount);
+    Comment(status);
+}
+
 //+------------------------------------------------------------------+
 //| Clear chart monitoring status                                    |
 //+------------------------------------------------------------------+
 void ClearChartStatus()
-  {
-   Comment("");
-  }
+{
+    Comment("");
+}
+
 //+------------------------------------------------------------------+
